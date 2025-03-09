@@ -1,0 +1,772 @@
+---
+title: "Alaska rex sole assessment"
+
+author: 
+ - Max Cardinale (SLU) for CIE
+
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    #keep_tex: false
+vignette: >
+  %\VignetteIndexEntry{benchmark Vignetted}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+```{r wrap-hook, echo = FALSE,warning=F,message=F}
+library(knitr)
+hook_output = knit_hooks$get('output')
+knit_hooks$set(output = function(x, options) {
+  # this hook is used only when the linewidth option is not NULL
+  if (!is.null(n <- options$linewidth)) {
+    x = knitr:::split_lines(x)
+    # any lines wider than n should be wrapped
+    if (any(nchar(x) > n)) x = strwrap(x, width = n)
+    x = paste(x, collapse = '\n')
+  }
+  hook_output(x, options)
+})
+```
+
+
+```{r, echo = FALSE,warning=F,message=F}
+
+knitr::opts_chunk$set(collapse = TRUE, comment = "  " ,fig.align = 'center', cache=FALSE,tidy.opts=list(width.cutoff=60), tidy=TRUE)
+```
+
+
+# Draft conclusions and recommendations
+
++ The  assessment of Alaska rex sole was conducted in March 2025 using the Stock Synthesis (SS) model (Methot & Wetzel 2013). This document is a comparison between the proposed "BaseCase" by the Assessment Team and alternative model configurations. A model that includes time varying selectivity and natural mortality might constitute a candidate alternative configuration to reduce misfit of length compositions and survey indices present in the current proposed baseline
+
++ 
+
++  
+
++   
+
+# BaseCase Model Development
+
++ The assessment model is a two-area yearly model where the population is comprised of 20+ age-classes with two sexes (males and females are considered as separated). The model is a length-based model where the numbers at length in the fisheries and survey data are converted into ages using the von Bertalanffy growth function. The model started in 1982 and it includes 1 commercial fisheries and 2 surveys. 
+
++ This document presents a comparison between the model configurations tested by the assessment Team and additional configurations built to improve the fitting of the LFDs and survey indices.
+
++ SSB is above the target reference point and fishing pressure was estimated to be below the target reference point for all model configurations tested.
+
+
+## Data revisions 
+
+  + Revision of survey data 
+
+  + Revision of composition data
+
+
+## Model setting
+
+ + Maximum age in the population set to 20 years (population plus group)
+ 
+ + Growth parameters separated for females and males using the von Bertallanfy function
+ 
+ + CV young and old individuals is estimated
+ 
+ + Some of the growth parameters by areas and sex are estimated
+ 
+ + Estimating selectivity for the commercial fleet and surveys
+ 
+ + Early recruitment era start in 1965
+ 
+ + Recruitment apportioning between areas is constant over time
+ 
+ 
+## Benchmark alternative model configuration
+
+Model Directory 
+
++ Reference run (BaseCase; run7_sampler_survbio_edits_new_data)
+
++ BaseCase_TVsel_fleet: As Reference run but assuming time varying selectivity for the fishery
+
++ BaseCase_TVM : As Reference run but assuming time varying natural mortality 
+
++ BaseCase_TVsel_fleet_TVM : As Reference run, but assuming time varying natural mortality and time varying selectivity for the fishery
+
++ run9_early_maturity : As Reference run, but assuming earlier maturity  
+
++ run10_late_maturity : As Reference run, but assuming later maturity
+
++ run11_est_male_M : As Reference run, but estimating natural mortality for males
+
++ BaseCase_TVsel_fleet_TVM_h072 : As Reference run, but assuming time varying natural mortality and time varying selectivity for the fishery and steepness 0.72 (from Fishlife)
+
+## Work flow 
+
++ Run first the file Ensemble_grid.Rmd (as an R file, the Rmd is too large to compile), which creates input files for this files (Basecase model Alaska rex sole.Rmd). The Ensemble_grid.Rmd is used as guidance for selecting the BestCase using diagnostic as in Carvahlo et al., 2021 (BaseCase_TVsel_fleet_TVM in this case), and prepare objects for this file, where the BaseCase and the BestCase are compared.
+
+
+Load R packages 
+
+```{r,warning=F,message=F}
+library(r4ss)
+library(ss3diags)
+library(ggplot2)
+library(ggpubr)
+library(FLCore)
+library(ggplotFL)
+library(FLSRTMB)
+library(FLRef)
+library(ss3om)
+library(png)
+library(parallel)
+library(doParallel)
+cl <- makeCluster(10, type="PSOCK")
+registerDoParallel(cl)
+```
+
+Some system specific setups (Linux vs Windows)
+
+```{r,warning=F,message=F}
+if (Sys.info()["sysname"] == "Windows") {
+
+    ss.exe   <- "~/Max/Stock_synthesis/ss3_3.23.1/ss3.exe"
+    main.dir <- "~/Max/Commitees/CIE/Alaska rex sole/Ensemble"
+    MC.CORES <- 3
+    
+} else {
+
+    SS_EXE <- "~/Max/Executives_SS/ss_linux"
+    main.dir <- "~/Max/WKBENCH 2023/Central Baltic herring/Ensemble"
+}
+```
+
+Load BestCase (produced by Ensemble_grid_example.R)
+
+```{r}
+
+# 2025 BestCase
+load("rdata_runs/Alaska rex sole_basecase_TVsel_fleet_TVM.rdata",verbose=F)
+ref = ss3rep
+
+load("rdata_runs/Alaska rex sole_basecase.rdata",verbose=F)
+base = ss3rep
+
+# load retrospective runs
+load("rdata_retros/RetroModels_basecase_TVsel_fleet_TVM.rdata",verbose=F)
+
+# load steepness profile (to be run only for the BestCase outside here; see last part of the script)
+load("BaseCase_TVsel_fleet_TVM/profile/profile_h.ref.rdata",verbose=F)
+
+```
+
+
+## Fishery Data
+
++ Catch data were available for the commercial fleets.  
+
++ 
+
+```{r fig1, fig.height=5,fig.width=7, fig.cap = paste0("Time series of annual total catches for Alaska rex sole")}
+mod = ref
+df.catch = mod$catch
+df.catch$Season = factor(df.catch$Seas)
+
+pc1 = ggplot(df.catch,
+             aes(Yr,Obs,fill=Fleet_Name))+theme_bw()+
+  geom_bar(position="stack", stat="identity")+
+  ylab("Catch")+xlab("Year")+
+  scale_x_continuous(expand = c(0.01, 0))+
+  scale_y_continuous(expand = c(0.01, 0))+
+  scale_fill_manual(
+    values=sscol(length(unique(df.catch$Fleet))))
+  
+pc1
+```
+
++ 
+
++ 
+
+```{r fig2, out.width="85%", fig.height=10,fig.width=7, fig.cap = paste0("Illustration of time series data for catches, LFDs age compositions and the survey indeces that were adopted as input for the Stock Synthesis model ")}
+
+SSplotData(ref,subplots=2)
+
+```
+
+## Survey
+
++ Two survey indices were include in the model. 
+
++  
+
+
+```{r fig3, fig.height=5,fig.width=7, fig.cap = paste0("EasternSurvey indices fit")}
+knitr::include_graphics("basecase_TVsel_fleet_TVM/plots/index2_cpuefit_EasternSurvey.png")
+```
+
+
+```{r fig4, fig.height=5,fig.width=7, fig.cap = paste0("NonEasternSurvey indices fit")}
+knitr::include_graphics("basecase_TVsel_fleet_TVM/plots/index2_cpuefit_NonEasternSurvey.png")
+```
+
+
+\pagebreak
+
+## Model specifications
+
++ The reference model for Alaska rex sole is an annual, sex-structured length-age based Stock Synthesis model. The underlying age-structured dynamics is set up to comprise ages 0-20, where age 20 was treated as a plus group. The population was modeled as sex-structured with sex-specific parametrisation for somatic growth. Stock fecundity was assumed to be proportional to female spawning stock biomass. 
+
++ For the reference model, the sex specific growth is modeled for both sexes using Von Bertalanffy model. $L_at_Amin$ and $L_at_Amax$ were estimated. The CVs for $L_at_Amin$ and $L_at_Amax$ were estimated. 
+
+```{r fig5, fig.height=5,fig.width=7, fig.cap = paste0("Growth functions for Female and Males.")}
+sspar(mfrow=c(1,1),plot.cex = 0.7)
+SSplotBiology(mod,subplots=1,main=F)
+
+```
+
++ Female maturity was assumed to have the form of a logistic ogive with an age at 50\% maturity ($A_{m_{50}}$) being attained at 5.7 years and a slope of -1.11 1/cm (Figure 7). 
+
+```{r fig6, fig.height=5,fig.width=7, fig.cap = paste0("Assumed Maturity ogive for females.")}
+sspar(mfrow=c(1,1),plot.cex = 0.7)
+SSplotBiology(mod,subplots=6,main=F)
+
+```
+
++ Sex-specific natural mortality at age ($M_a$) were inputed as a single value (0.17)  
+
+```{r fig7, fig.height=5,fig.width=7, fig.cap = paste0("Estimated variation in natural mortality vectors for females of area 1")}
+knitr::include_graphics("basecase_TVsel_fleet_TVM/plots/bio24_time-varying_NatM_uniform_Fem_GP_1.png")
+```
+
+
++ Nominal spawning and settling time were set to January 1st. The expected mean recruitment was assumed to follow a Beverton and Holt stock recruitment relationship. For the BaseCase a steepness of $h = 1.0$ was assumed. Recruitment deviations were estimated for 1982-2022 as main recruitment deviations and for the preceding years 1965-1982 as early recruitment deviations. Recruitment deviations were assumed to have a penalty of 0.6 on the standard deviation (sigmaR). 
+
++ All fleets assumed a double-normal (dome-shaped) selectivity (option 20). 
+
++ 
+
++ Fishing mortality was modeled using the hybrid F method (Option 3). In the original model, option three was selected for the fishing mortality (F) report basis. However, for this document Option five was selected for the fishing mortality (F) report basis only for representation and to allow the use of MVLN; this option corresponded to the simple unweighted average of the F of the age classes chosen to represent the Fbar (age 5–10). 
+
+\pagebreak
+
+## Model Diagnostics
+
+Prepare outputs of retrospective runs (see Supplement for coding)
+
+```{r}
+retro.idx = r4ss::SSsummarize(retroModels,verbose = F)
+retro.len = ss3diags::SSretroComps(retroModels)
+```
+
+### Survey indices
+
+The BestCase model fitted all indices moderately well, with runs tests indicating mixed evidence for a systematic residual pattern.
+
+```{r fig8, fig.height=8,fig.width=9, fig.cap = paste0("Fit, residual diagnostics and hindcast cross-validations for Survey Index")}
+sspar(mfrow=c(3,2),plot.cex = 0.7)
+for(i in 1:2){
+SSplotIndices(ref,subplots = 2,fleets=i+1)
+r=SSplotRunstest(ref,add=T,verbose = F,indexselect = i)
+}
+
+```
+
+\pagebreak
+
++ Figure 8 check conflict between indices and mean length. As the value are under 30%, no major conflicts were found
+
+```{r fig9, fig.height=8,fig.width=9, fig.cap = paste0("Joint residuals")}
+sspar(mfrow=c(1,2),plot.cex = 0.8)
+SSplotJABBAres(ref,subplots="cpue",add=T,col=sscol(3)[c(1,3,2)])
+SSplotJABBAres(ref,subplots="len",add=T,col=sscol(3)[c(1,3,2)])
+
+```
+
+### Size composition
+
++ The estimated selectivity curves for the BestCase are shown in Figure 9, with time-varying selectivity patterns for illustrated in Figure 10. 
+
++ The fits to the size composition (Figure 11) and conditional age-length-key data (data not shown) appeared overall adequate and only showed evidence for non-random residual patterns in few instances. Sex ratio at length by the current reference case is also satisfying (Figure 14).
+
+```{r fig10, fig.height=6,fig.width=8, fig.cap = paste0("Estimated logistic selectivity curves by fleet")}
+
+sspar(mfrow=c(1,1),plot.cex = 0.8)
+SSplotSelex(ref,subplots = 2)
+
+```
+
+
+```{r fig11, fig.height=7,fig.width=9, fig.cap = paste0("Plot illustrating the estimated time-varying changes in the selectivity curves for the fishery")}
+sspar(mfrow=c(1,2),plot.cex = 0.7)
+SSplotSelex(ref,subplots = 12)
+```
+
+
+```{r fig12,warning=F, fig.height=10,fig.width=10, fig.cap = paste0("Summary of observed and expected composition data aggregated across years")}
+
+SSplotComps(ref,subplots=21)
+```
+
+
+```{r fig13, fig.height=7,fig.width=8, fig.cap = paste0("Residuals for mean lengths of size composition data from fishing fleets and surveys")}
+SSplotComps(ref,subplots = 24)
+```
+
+
+```{r fig14, fig.height=7,fig.width=8, fig.cap = paste0("Run test for mean lengths of size composition data from fishing fleets and surveys")}
+sspar(mfrow=c(3,3),plot.cex = 0.5)
+for(i in 1:2){
+r= SSplotRunstest(ref,subplots ="len",add=T,indexselect = i,verbose=F)
+}
+```
+
+
+```{r fig15, fig.height=7,fig.width=8, fig.cap = paste0("Observed and predicted sex ratio by length")}
+SSplotSexRatio(ref,kind="LEN")
+```
+
+\pagebreak
+
+### Restropective Analysis 
+
++ The retrospective analysis showed a slightly retrospective pattern on $SSB$ from Mohn's Rho of 0.04, while the $F$ bias was -0.05. Forecast bias were similar to retrospective bias. All retrospective peels fell within the 95\% confidence intervals of the full model 
+
+```{r fig16, fig.height=7,fig.width=9, fig.cap = paste0("Retrospective analysis and retrospective forecasts for the 2025 BestCase model")}
+sspar(mfrow=c(2,2),plot.cex = 0.65)
+r=SSplotRetro(retro.idx,add=T,legend=F,forecast=F,verbose = F)
+r=SSplotRetro(retro.idx,add=T,forecastrho = T,legend=F,
+            verbose = F,xlim=c(2005,2024))
+r=SSplotRetro(retro.idx,subplots = "F",add=T,legend=F,forecast=F,
+            verbose = F)
+r=SSplotRetro(retro.idx,subplots = "F",add=T,forecastrho = T,legend=F,
+            verbose = F,xlim=c(2005,2024))
+mtext(c("Retro","Forecast"),3,outer=T,line=-0.5,at=c(0.3,0.8),cex=0.8)
+
+```
+
+### Hindcast Cross-Validations
+
+Hindcast cross-validations indicated that the model has moderate prediction skill for the indices. By contrast, the model indicated good prediction skill for mean lengths and age (Figure 16).
+
+```{r fig17, fig.height=8,fig.width=7, fig.cap = paste0("Fit and hindcast cross-validations for the Survey size compositions of the BestCase model")}
+sspar(mfrow=c(2,3),plot.cex = 0.5)
+SSplotHCxval(retro.len,subplots = "len",add=T,verbose = FALSE)
+```
+
+
+```{r fig18, fig.height=8,fig.width=7, fig.cap = paste0("Fit and hindcast cross-validations for the fishery age compositions of the BestCase model")}
+sspar(mfrow=c(1,1),plot.cex = 0.5)
+SSplotHCxval(retro.len,subplots = "age",add=T,verbose = FALSE)
+```
+
+
+Hindcast with Cross-Validation of CPUE observations
+
+```{r fig19, fig.height=8,fig.width=7, fig.cap = paste0("Hindcast with Cross-Validation of CPUE observations for the BestCase model")}
+sspar(mfrow=c(1,2),plot.cex = 0.9)
+SSplotHCxval(retroSummary,xmin=2006,add=T,legendcex = 0.6)
+
+```
+
+
+\pagebreak
+
+### Profiling of steepness
+
+The reference case  was further evaluated through profiling it over a range of steepness values $h = 0.45-0.95$.
+
+Figure 22 shows that a higher range of $h = 0.90-0.95$ is supported by the total negative log-likelihood.
+
+The stock estimates appear insensitive to alternative assumption about the steepness $h$ values tested (Figure 22)
+
+```{r fig20, fig.height=8,fig.width=7, fig.cap = paste0("Negative log-likelihood profiles over a range of steepness values (h = 0.65-0.95)")}
+
+# summarize output
+profilesummary <- SSsummarize(profilemodels,verbose=F)
+results <- SSplotProfile(profilesummary, add_cutoff = TRUE, verbose=F,
+                         profile.string = "SR_BH_steep",
+                         profile.label = "Stock-recruit steepness (h)")
+
+```
+
+```{r fig21, fig.height=9,fig.width=8, fig.cap = paste0("Comparison of stock trajectories with alternative stepness values (h = 0.65-0.95)")}
+
+h = c(seq(0.65,0.95,0.05))
+
+mvns = Map(function(x,y){
+    SSdeltaMVLN(x,add=T,run =paste0("h=",y),Fref = "Btgt",
+                catch.type = "Exp",years=1982:2024,
+                verbose = F,plot = F)},
+           x=profilemodels,y=h)
+
+sspar(mfrow=c(3,2),plot.cex = 0.7)
+SSplotEnsemble(mvns,
+               uncertainty =T,
+               add=T,
+               legendcex = 0.65,
+               legendloc = "topright",verbose = F)
+
+```
+
++ Fishlife steepness value for the species is 0.72. The minimum likelihood is most likely an artifact of the historical trajectory of the stock, with little contrast in SSB due to the low fishing mortality. Due to asymmetric risk (Hordyk et al., 2019), it would be more appropriate to use a lower steepness value.
+
+```{r fig22, fig.height=9,fig.width=8, fig.cap = paste0("Tuned fishlife trait history for Alaska rex sole")}
+library(SPMpriors)
+library(FishLife)
+library(rfishbase)
+library(FLCandy)
+
+stk_rexsole= flmvn_traits(Genus="Glyptocephalus",Species="zachirus",Loo=c(49.38,0.1),Lm=c(32,0.1),h=c(0.95,0.99),K=c(0.18,0.1), tmax=c(20,0.1),M=c(0.17, 0.1), Plot=T,savepng = F)
+```
+
+```{r}
+table = stk_rexsole$traits
+knitr::kable(table,"pipe",
+      align ="lccccc",
+      caption="Tuned fishlife trait history for Alaska rex sole")
+
+write.csv(table,file="Fishlife table.csv",row.names = F)
+```
+
+
+\pagebreak
+
+# Assessment outcome
+
+## Reference Points
+
++ Reference points were estimated within the Stock Synthesis model, where the biomass reference points are considered as $SSB$ for females. For illustration only, target reference points of $B_{tgt} = SSB_{40}$ (biomass equal to 40 percent of unfished biomass $SBB_0$) and $F_{tgt}$ = $F_{SB40}$ (fishing mortality level at $SSB_{40}$) were proposed to serve a preliminary as proxies for $B_{MSY}$ and $F_{MSY}$. In the light of uncertainty about the underlying stock recruitment relationship, this choice of precautionary MSY proxies is likely to reduce the asymmetric risk of overfishing, while still attaining more than 95% of the theoretical MSY at FMSY and ensuring that about more 40\% more $SBB$ is left in the water to ensure both future recruitment and catch opportunities. 
+
++ When compared to the BaseCase, the BestCase improves the fit of the last year of the indices and the LFDs
+
+```{r fig23, fig.height=5,fig.width=8, fig.cap = paste0("Comparison between BaseCase and BestCase model for the fit of survey indices")}
+
+sspar(mfrow=c(2,2),plot.cex = 0.7)
+SSplotIndices(base,subplots = 2)
+SSplotIndices(ref,subplots = 2)
+```
+
+```{r fig24, fig.height=5,fig.width=8, fig.cap = paste0("Comparison between BaseCase (top) and BestCase for the fit of the aggregated lenght compositions (down)")}
+
+sspar(mfrow=c(1,2),plot.cex = 0.7)
+SSplotComps(base,subplots = 21)
+SSplotComps(ref,subplots = 21)
+```
+
+
+```{r fig25, fig.height=5,fig.width=8, fig.cap = paste0("Comparison between BaseCase (top) and BestCase model for the fit of the aggregated age compositions (down)")}
+
+sspar(mfrow=c(1,2),plot.cex = 0.7)
+SSplotComps(base,subplots = 21, kind="AGE")
+SSplotComps(ref,subplots = 21, kind="AGE")
+```
+
+
+##  Stock Status as estimated by the BestCase model
+
++ Only for illustration, Blim and Btrigger were added
+
+```{r}
+mvnbase= FLRef::ssmvln(ref, Fref="Btgt",years=1982:2024,verbose=T)
+stk = ss2FLStockR(mvnbase)
+
+# Add Btrigger + Blim
+stk@refpts = rbind(stk@refpts,
+                FLPar(Btrigger=stk@refpts[[2]]*1,Blim=stk@refpts[[2]]*0.50)) 
+
+# with uncertainty
+stki = ss2FLStockR(mvnbase,output="iters") 
+stki@refpts = stk@refpts
+```
+
+
+```{r fig26, warning=F,message=F, fig.height=7,fig.width=9, fig.cap = paste0("Estimated stock status trajectories with associated reference points for the 2025 BestCase model of Alaska rex sole")}
+
+plotAdvice(stki)
+
+```
+
+## Comparison with previous model
+
+```{r fig27, warning=F,message=F, fig.height=7,fig.width=9, fig.cap = paste0("Comparison between the estimated stock status trajectories from the BestCase and the last previous advice model")}
+## Summarize output
+mydir <- "~/Max/Commitees/CIE/Alaska rex sole/Ensemble/run13_sampler_and_survbio_edits/"
+rdata_retros = "~/Max/Commitees/CIE/Alaska rex sole/Ensemble/rdata_retros"
+rdata_runs = "~/Max/Commitees/CIE/Alaska rex sole/Ensemble/rdata_runs"
+retroModels <- SSgetoutput(dirvec=file.path(mydir, "Retrospective",paste("retro",0:-5, sep="")))
+i="run13_sampler_and_survbio_edits"
+
+retroSummary <- r4ss::SSsummarize(retroModels)
+    endyrvec <- endyrvec <- retroSummary$endyrs + 0:-5
+    save(retroSummary, retroModels, file=paste0(dir = rdata_retros,"/RetroModels_",i,".Rdata"))
+    
+    ss3rep = retroModels[[1]]
+    save(ss3rep, file=paste0(dir = rdata_runs,"/Alaska rex sole_",i,".Rdata")) 
+    
+load("rdata_runs/Alaska rex sole_run13_sampler_and_survbio_edits.RData",verbose=T)
+bm = FLRef::ssmvln(ss3rep, Fref="Btgt",verbose=F)
+stk.bm = ss2FLStockR(bm)
+
+plot(FLStocks(New2025=stk,Reference2021=stk.bm))+
+  facet_wrap(~qname,scales="free_y")+theme_bw()
+
+```
+
+
+```{r fig28, warning=F,message=F, fig.height=7,fig.width=9, fig.cap = paste0("Comparison between the relative stock status estimates from the BestCase and the last previous advice model")}
+
+stks=FLStocks(
+New2025 = stock2ratios(stk),
+Reference2021 = stock2ratios(stk.bm)
+)
+stks[[1]]@refpts = stks[[1]]@refpts[1:2]
+stks[[2]]@refpts = stks[[2]]@refpts[1:2]
+plotAdvice(stks)
+
+```
+
+\pagebreak
+
+```{r}
+knitr::kable(FLRef::flr2stars(stk)$refpts,"pipe",
+      align ="lc",caption="Summary of the estimated reference points 
+      for Alaska rex sole")
+
+```
+
+
+```{r, fig29, out.width="85%", fig.height=7,fig.width=8, fig.cap = paste0("Comparison of alternative models")}
+knitr::include_graphics("MLVN_Compare.jpg")
+```
+
+\pagebreak
+
++ Diagnostic table for Alaska rex sole. Models with time varying fleet selectivity and M achieved highest score.
+
+```{r, fig30, out.width="150%", fig.cap = paste0("Diagnostic table for Alaska rex sole")}
+knitr::include_graphics("./Diags_table.pdf")
+
+```
+
+\pagebreak
+
+```{r}
+out = FLRef::flr2stars(stki)$timeseries
+mles = FLRef::flr2stars(stk)
+
+# replace medians with mles 
+out$Rec=mles$timeseries$Rec
+out$SSB=mles$timeseries$SSB
+out$Bratio=mles$timeseries$Bratio
+out$F=mles$timeseries$F
+out$Fratio=mles$timeseries$Fratio
+
+write.csv(out,file="Alaska rex sole.stars.csv",row.names = F)
+write.csv(mles$refpts,file="Alaska rex sole.refpts.stars.csv",row.names = F)
+
+```
+
+\pagebreak
+
+# Supplement: R code to run additional diagnostics (to be run outside the script)
+
+```{r,eval=FALSE}
+#><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>
+#> Stock Synthesis reference model summary and diagnostic for Alaska rex sole
+#> @author Henning Winker (GFCM), modified by Max Cardinale (SLU)
+#> henning.winker@fao.org
+
+#><>><>><>><>><>><>
+# Load packages
+library("r4ss")
+library("ss3diags")
+
+# First set working directory to the R file location with ss3 subfolders
+
+# Define run name of folder
+run ="basecase_TVsel_fleet_TVM"
+
+# Load the model run
+ss3rep = SS_output(run)
+
+# Plot the model run
+r4ss::SS_plots(ss3rep)
+
+# Save the r4ss object as rdata
+dir.create("rdata")
+save(ss3rep,file=file.path("rdata",paste0("Alaska rex sole_",run,".rdata")))
+
+# approximate uncertainty  and produce Kobe Plot
+sspar(mfrow=c(1,1))
+mvn = SSdeltaMVLN(ss3rep,Fref="Btgt",run="ref",catch.type="Exp")
+
+# Plot trajectories with CIs
+sspar(mfrow=c(3,2))
+SSplotEnsemble(list(mvn),add=T)
+
+#><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>
+### Compile results summary
+#><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>
+
+# Make output PDF
+pdf(paste0("Alaska rex sole_",run,".pdf"))
+sspar(mfrow=c(2,2),plot.cex = 0.7)
+SSplotBiology(ss3rep,mainTitle=F,subplots = c(1))
+SSplotBiology(ss3rep,mainTitle=F,subplots = c(21))
+SSplotBiology(ss3rep,mainTitle=F,subplots = c(6))
+SSplotBiology(ss3rep,mainTitle=F,subplots = c(9))
+
+sspar(mfrow=c(2,2),plot.cex = 0.7)
+SSplotBiology(ss3rep,mainTitle=F,subplots = c(4))
+
+# Recruitment
+sspar(mfrow=c(2,2),plot.cex = 0.7)
+SSplotRecdevs(ss3rep,subplots = 1)
+SSplotRecdevs(ss3rep,subplots = 2)
+SSplotSpawnrecruit(ss3rep,subplots = 1)
+SSplotSpawnrecruit(ss3rep,subplots = 3)
+
+par(mfrow=c(1,1))
+SSplotDynamicB0(ss3rep)
+
+sspar(mfrow=c(1,3),plot.cex = 0.7)
+SSplotIndices(ss3rep,subplots = 2)
+
+sspar(mfrow=c(1,1),plot.cex = 0.7)
+SSplotIndices(ss3rep,subplots =9)
+
+sspar(mfrow=c(2,3),plot.cex = 0.9)
+SSplotHCxval(retro.idx,xmin=2006,add=T,legendcex = 0.6, Season=1)
+SSplotHCxval(retro.len,add=T,subplots = "len",legendloc="topleft",indexUncertainty = TRUE,legendcex = 0.6)
+
+par(mfrow=c(1,1))
+SSplotSelex(ss3rep,subplots = 1)
+
+SSplotComps(ss3rep,subplots = 21)
+
+SSplotComps(ss3rep,subplots = 1)
+
+SSplotSexRatio(ss3rep,kind="LEN")
+
+# Bubble
+SSplotComps(ss3rep,subplots = 24)
+
+# ALK
+SSplotComps(ss3rep,kind= "cond",subplots = 3)
+
+# Runs Fleets
+sspar(mfrow=c(3,3),plot.cex = 0.5)
+SSplotRunstest(ss3rep,subplots ="len",add=T)
+
+# HC Fleets
+sspar(mfrow=c(3,2),plot.cex = 0.5)
+for(i in 1:2){
+  SSplotHCxval(retro.len,subplots ="len",add=T,legendloc = "topleft",indexselect = i)
+}
+
+# Retro
+sspar(mfrow=c(2,2),plot.cex = 0.65)
+SSplotRetro(retro.idx,add=T,legend=F,forecast=F)
+SSplotRetro(retro.idx,add=T,forecastrho = T,legend=F)
+SSplotRetro(retro.idx,subplots = "F",add=T,legend=F,forecast=F)
+SSplotRetro(retro.idx,subplots = "F",add=T,forecastrho = T,legend=F)
+mtext(c("Retro","Forecast"),3,outer=T,line=-0.5,at=c(0.3,0.8),cex=0.8)
+
+par(mfrow=c(1,1))
+SSplotYield(ss3rep,subplots = 2)
+
+sspar(mfrow=c(1,1))
+mvn = SSdeltaMVLN(ss3rep,Fref="Btgt",catch.type = "Exp",run="ref")
+
+sspar(mfrow=c(3,2))
+SSplotEnsemble(list(mvn),add=T)
+
+dev.off()
+
+```
+
+
+```{r,eval=FALSE, echo=FALSE}
+#><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>
+### PROFILING STEEPNESS
+#><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>><>
+
+# Create subdirectory for profile runs
+dir.create(file.path(getwd(),run, "profile"))
+
+# specify directory
+dir_prof <- file.path(getwd(),run, "profile")
+
+# Copy/Paste ss3 files for running profiles
+copy_SS_inputs(
+  dir.old = file.path(getwd(),run),
+  dir.new = dir_prof,
+  copy_exe = TRUE,
+  create.dir = TRUE,
+  overwrite = TRUE,
+  copy_par = TRUE,
+  verbose = TRUE
+)
+
+# Manipulate starter file
+starter <- SS_readstarter(file.path(dir_prof, "starter.ss"))
+
+# change control file name in the starter file
+starter[["ctlfile"]] <- "control_modified.ss"
+
+# make sure the prior likelihood is calculated
+# for non-estimated quantities
+starter[["prior_like"]] <- 1
+
+# write modified starter file
+SS_writestarter(starter, dir = dir_prof, overwrite = TRUE)
+
+# define steepness range
+h.vec <- seq(0.65, 0.95, .05)
+
+# Specify dat and control files
+DAT = "GOA_Rex_8_2021.dat"
+CTL = "GOA_Rex_8_2021.ctl"
+Nprofile <- length(h.vec)
+
+# run profile command
+ncores <- parallelly::availableCores(omit = 1)
+future::plan(future::multisession, workers = ncores)
+profile <- r4ss::profile(
+  dir = dir_prof,
+  oldctlfile = paste(CTL),
+  newctlfile = "control_modified.ss",
+  string = "SR_BH_steep", # subset of parameter label
+  exe = "ss3.exe",
+  profilevec = h.vec, skipfinished=T,
+)
+
+future::plan(future::sequential)
+
+# compile model runs 
+profilemodels <- SSgetoutput(dirvec = dir_prof, keyvec = c(1:7:Nprofile))
+
+# Save as rdata
+save(profilemodels,file=paste0(dir_prof,"/profile_h.ref.rdata"))
+
+# summarize output
+profilesummary <- SSsummarize(profilemodels)
+
+# Make log-likelihood profile plot
+results <- SSplotProfile(profilesummary,
+                         profile.string = "SR_BH_steep", 
+                         profile.label = "Stock-recruit steepness (h)"
+) 
+
+# check results
+results
+
+```
+
+### Literature cited
+
++ Felipe Carvalho, Henning Winker, Dean Courtney, Laurence Kell, Maia Kapur, Massimiliano Cardinale, Michael Schirripa, Toshihide Kitakado, Dawit Y. Ghebrehiwet, Kevin R. Piner, Mark N. Maunder, Rick Methot, 2021. A Cookbook for Using Model Diagnostics in Integrated Stock Assessments. Fisheries Research, https://doi.org/10.1016/j.fishres.2021.105959.
+
++ Adrian R. Hordyk, Quang C. Huynh, Thomas R. Carruthers 2019. Misspecification in stock assessments: Common uncertainties and asymmetric risks. Fish and Fisheries, https://doi.org/10.1111/faf.12382
+```
